@@ -35,7 +35,7 @@ export const analyticsToolDefinitions:any[] = [
  {type:"function",function:{name:"compare_periods",description:"Compare deux périodes consécutives de même durée sur recettes, ticket, corrections, ventes café et chicha. La période récente est comparée à la période précédente.",parameters:{type:"object",properties:{days:{type:"integer",minimum:1,maximum:180}},required:["days"],additionalProperties:false}}}
 ];
 
-export async function executeAnalyticsTool(name:string,args:any={}){
+export async function executeAnalyticsTool(name:string,args:any={}): Promise<any>{
  if(name==="simulate_business_decision"){
   if(args.scenario==="price")return scenarioCalculations.price(Number(args.currentPrice),Number(args.newPrice),Number(args.units));
   if(args.scenario==="loan")return scenarioCalculations.loan(Number(args.principal),Number(args.annualRatePercent),Number(args.months));
@@ -59,7 +59,7 @@ export async function executeAnalyticsTool(name:string,args:any={}){
   for(const x of consumption.corrections){const k=x.item;const a=corrections.get(k)||{item:k,occurrences:0,absoluteAmount:0,netAmount:0};a.occurrences++;a.absoluteAmount+=Math.abs(x.acceptedAmount);a.netAmount+=x.acceptedAmount;corrections.set(k,a)}
   const recurring=[...corrections.values()].filter(x=>x.occurrences>=2).map(x=>({...x,absoluteAmount:r3(x.absoluteAmount),netAmount:r3(x.netAmount)})).sort((a,b)=>b.absoluteAmount-a.absoluteAmount);
   const signals:any[]=[];
-  if(top.length&&top[0].sharePercent>=40)signals.push({kind:"REVENUE_CONCENTRATION",classification:"CALCULATION",evidence:top[0],recommendation:"Comparer la concentration sur plusieurs périodes et tester une offre complémentaire",successMetric:"part du chiffre ticket par produit"});
+  if(top.length && top[0].sharePercent !== null && top[0].sharePercent >= 40)signals.push({kind:"REVENUE_CONCENTRATION",classification:"CALCULATION",evidence:top[0],recommendation:"Comparer la concentration sur plusieurs périodes et tester une offre complémentaire",successMetric:"part du chiffre ticket par produit"});
   if(recurring.length)signals.push({kind:"REPEATED_STOCK_CORRECTIONS",classification:"CALCULATION",evidence:recurring.slice(0,5),recommendation:"Vérifier les fiches stock et règles de consommation",successMetric:"fréquence et montant absolu des corrections"});
   if(comparison.previous.shifts>0&&comparison.recent.shifts>0&&comparison.changes.ticketPercent!=null&&comparison.changes.ticketPercent<0)signals.push({kind:"TICKET_DECLINE",classification:"CALCULATION",evidence:comparison.changes,qualification:comparison.comparability.warning,recommendation:"Comparer les ventes par produit et le nombre de shifts avant de conclure",successMetric:"ventes ticket par shift"});
   return {classification:"FACT_AND_CALCULATION",periodDays:days,totalTicketRevenue:total,topProducts:top,categories,recurringCorrections:recurring.slice(0,10),comparison,signals,missingInputs:["coûts matière et marges","transactions individuelles/horaires pour panier moyen et heures de pointe"],warnings:["Les opportunités sont des hypothèses à tester, pas des bénéfices garantis","Les corrections ne prouvent ni vol ni gaspillage"]};
@@ -113,12 +113,12 @@ export async function executeAnalyticsTool(name:string,args:any={}){
       const normal=sh.metrics.filter(m=>m.metricCode==="CHICHA_NORMAL").reduce((a,m)=>a+n(m.value),0);
       const personnel=sh.metrics.filter(m=>m.metricCode==="CHICHA_PERSONNEL").reduce((a,m)=>a+n(m.value),0);
       const grams=sh.metrics.filter(m=>m.metricCode==="TOMBAC_CONSUMED").reduce((a,m)=>a+n(m.value),0);
-      return normal+personnel>0?grams/(normal+personnel):null;
+      return normal>0?grams/normal:null;
     }).filter((v):v is number=>v!==null&&Number.isFinite(v));
     return ratios.length?{shiftCount:ratios.length,average:r3(ratios.reduce((a,v)=>a+v,0)/ratios.length),min:r3(Math.min(...ratios)),max:r3(Math.max(...ratios))}:null;
   })();
   const coffeeCurrent=coffeeSold>0?r3(beans/coffeeSold):null;
-  const chichaCurrent=chichaNormal+chichaPersonnel>0?r3(tombac/(chichaNormal+chichaPersonnel)):null;
+  const chichaCurrent=chichaNormal>0?r3(tombac/chichaNormal):null;
   const anomaly=(label:string,current:number|null,ref:any)=>{
     if(current==null||!ref||ref.shiftCount<2||ref.average<=0) return null;
     const multiple=r3(current/ref.average), percent=r3((current-ref.average)/ref.average*100);
@@ -126,7 +126,7 @@ export async function executeAnalyticsTool(name:string,args:any={}){
     if(current>ref.max||current<ref.min) return {metric:label,current,historicalAverage:ref.average,historicalMin:ref.min,historicalMax:ref.max,comparisonMultiple:multiple,percentVsAverage:percent,reason:"hors de la plage observée des shifts précédents"};
     return null;
   };
-  const anomalies=[anomaly("gramsPerCoffee",coffeeCurrent,coffeeHistory),anomaly("gramsPerMappedChicha",chichaCurrent,chichaHistory)].filter(Boolean);
+  const anomalies=[anomaly("gramsPerCoffee",coffeeCurrent,coffeeHistory),anomaly("gramsPerNormalChicha",chichaCurrent,chichaHistory)].filter(Boolean);
   return {
     found:true, scope:"single_last_recorded_shift", shiftId:x.id, recordedAt:(x.recordedAt||x.closedAt).toISOString(), worker:x.worker?.name||null,
     finance:{recetteFinale:r3(n(x.recetteFinale)),cashCaisse:r3(n(x.cashCaisse)),ramiGames:r3(n(x.ramiGames)),ramiValue:r3(n(x.ramiValue)),ticketTotal:r3(n(x.ticketTotal)),acceptedCorrections:r3(n(x.acceptedCorrectionTotal)),expenses:r3(n(x.expenseTotal)),staffSalary:r3(n(x.staffSalary))},
@@ -134,8 +134,8 @@ export async function executeAnalyticsTool(name:string,args:any={}){
     stock:{lines:stock,largestPhysicalConsumption:[...stock].filter(v=>v.consumed!=null).sort((a,b)=>Math.abs(b.consumed||0)-Math.abs(a.consumed||0)).slice(0,8)},
     corrections:{lines:corrections,totalAccepted:r3(corrections.reduce((a,v)=>a+v.acceptedAmount,0)),largest:corrections.slice(0,5)},
     cafe:{sold:coffeeSold,beansConsumed:beans,beansUnit:"g",gramsPerCoffee:coffeeCurrent},
-    chicha:{normal:chichaNormal,personnel:chichaPersonnel,total:r3(chichaNormal+chichaPersonnel),tombacConsumed:tombac,tombacUnit:"g",gramsPerMappedChicha:chichaCurrent},
-    historicalReference:{priorRecordedShifts:prior.length,coffeeGramsPerCoffee:coffeeHistory,chichaGramsPerMappedChicha:chichaHistory},
+    chicha:{normal:chichaNormal,personnel:chichaPersonnel,total:r3(chichaNormal+chichaPersonnel),tombacConsumed:tombac,tombacUnit:"g",gramsPerMappedChicha:chichaCurrent,gramsPerNormalChicha:chichaCurrent},
+    historicalReference:{priorRecordedShifts:prior.length,coffeeGramsPerCoffee:coffeeHistory,chichaGramsPerMappedChicha:chichaHistory,chichaGramsPerNormalChicha:chichaHistory},
     anomalies,
     missingBusinessData:["coûts matière / coûts d'achat","marges par produit","données de fréquentation/occupation","horaires de vente détaillés si non enregistrés"],
     interpretationRules:["Les corrections ne sont pas du chiffre d'affaires ticket.","Un écart ne prouve pas sa cause: signaler ce qui mérite vérification sans accuser ni inventer.","Comparer séparément volume vendu, consommation physique, ticket et recette finale."]
@@ -154,7 +154,7 @@ export async function executeAnalyticsTool(name:string,args:any={}){
   const codes=name==="analyse_cafe"?["COFFEE_SOLD","COFFEE_BEANS_CONSUMED"]:["CHICHA_NORMAL","CHICHA_PERSONNEL","TOMBAC_CONSUMED"];
   const ms=await prisma.shiftMetric.findMany({where:{shift:{shopId:s.id,status:"RECORDED",recordedAt:{gte:start}},metricCode:{in:codes}}}); const sum=(c:string)=>r3(ms.filter(m=>m.metricCode===c).reduce((a,m)=>a+n(m.value),0));
   if(name==="analyse_cafe"){const sold=sum("COFFEE_SOLD"),beans=sum("COFFEE_BEANS_CONSUMED");return {periodDays:days,coffeeSold:sold,beansConsumed:beans,beansUnit:"g",gramsPerCoffee:sold>0?r3(beans/sold):null};}
-  const normal=sum("CHICHA_NORMAL"),personnel=sum("CHICHA_PERSONNEL"),tombac=sum("TOMBAC_CONSUMED");return {periodDays:days,chichaNormal:normal,chichaPersonnel:personnel,chichaTotal:r3(normal+personnel),tombacConsumed:tombac,tombacUnit:"g",gramsPerMappedChicha:normal+personnel>0?r3(tombac/(normal+personnel)):null};
+  const normal=sum("CHICHA_NORMAL"),personnel=sum("CHICHA_PERSONNEL"),tombac=sum("TOMBAC_CONSUMED");return {periodDays:days,chichaNormal:normal,chichaPersonnel:personnel,chichaTotal:r3(normal+personnel),tombacConsumed:tombac,tombacUnit:"g",gramsPerNormalChicha:normal+personnel>0?r3(tombac/(normal+personnel)):null};
  }
  if(name==="analyse_consumption"){
   const [moves,corr]=await Promise.all([prisma.stockMovement.findMany({where:{source:"RECETTE",shift:{shopId:s.id,status:"RECORDED",recordedAt:{gte:start}}},include:{item:true}}),prisma.shiftCorrection.findMany({where:{shift:{shopId:s.id,status:"RECORDED",recordedAt:{gte:start}}},include:{item:true}})]);
