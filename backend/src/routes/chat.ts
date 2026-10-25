@@ -1141,8 +1141,21 @@ function calculateRecette(data: RecetteData): RecetteCalculations {
 
   push(makeCorrection("EAU_1L", "EAU 1L", actualConsumption(data,["EAU 1L"]), sold(data,["EAU 1L"]), 1.5));
 
-  push(makeCorrection("GAZEUSE", "GAZEUSE", actualConsumption(data,["GAZEUSE"]), sold(data,["BOISSON GAZEUZE","GAZEUSE"]), 1.5));
-
+push(makeCorrection(
+  "GAZEUSE",
+  "BOISSON GAZEUSE",
+  actualConsumption(data, [
+    "GAZEUSE",
+    "BOISSON GAZEUSE",
+    "BOISSON GAZEUZE"
+  ]),
+  sold(data, [
+    "GAZEUSE",
+    "BOISSON GAZEUSE",
+    "BOISSON GAZEUZE"
+  ]),
+  1.5
+));
   push(makeCorrection("CANNETTE", "CANNETTE", actualConsumption(data,["CANNETTE","CANETTE"]), sold(data,["CANETTE","CANNETTE"]), 2.0));
 
   const citronActual = actualConsumption(data,["CITRON"]);
